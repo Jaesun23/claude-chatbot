@@ -1,0 +1,2097 @@
+<README.md>
+
+# Claude Chatbot
+
+이 프로젝트는 Anthropic의 Claude API를 사용하여 구현한 대화형 챗봇입니다.
+
+## 기능
+
+- 다중 세션 관리
+- 마크다운 형식의 응답 처리
+- 코드 블록 하이라이팅
+- 토큰 사용량 모니터링
+- max_tokens 및 temperature 설정
+
+## 설치
+
+1. 이 저장소를 클론합니다:
+git clone https://github.com/yourusername/claude-chatbot.git
+
+2. 프로젝트 디렉토리로 이동합니다:
+cd claude-chatbot
+
+3. 필요한 패키지를 설치합니다:
+pip install -r requirements.txt
+
+4. `config/config.yaml` 파일을 생성하고 Anthropic API 키를 추가합니다:
+```yaml
+api_key: "your_api_key_here"
+
+
+## 환경 설정
+
+1. `.env.example` 파일을 `.env`로 복사합니다:
+cp .env.example .env
+
+2. `.env` 파일을 열고 `ANTHROPIC_API_KEY`와 `ENCRYPTION_KEY`를 설정합니다:
+- `ANTHROPIC_API_KEY`: Anthropic API 키를 암호화한 값
+- `ENCRYPTION_KEY`: 대화 내용 암호화에 사용할 키
+
+3. Python 버전 설정:
+이 프로젝트는 Python 3.12.4를 사용합니다. pyenv를 사용하여 Python 버전을 설정하세요:
+pyenv install 3.12.4
+pyenv local 3.9.5
+
+
+## 보안
+
+- API 키는 암호화되어 환경변수로 저장됩니다.
+- 대화 내용은 저장 시 암호화되며, 로드 시 복호화됩니다.
+- 암호화 키를 안전하게 관리해주세요.
+
+
+## 사용법
+프로그램을 실행하려면:
+python main.py
+
+## 개발
+src/ 디렉토리에는 주요 소스 코드가 있습니다.
+tests/ 디렉토리에는 단위 테스트가 있습니다.
+새로운 기능을 추가할 때는 해당하는 테스트도 작성해주세요.
+
+## 기여
+버그를 발견하거나 새로운 기능을 제안하고 싶다면 이슈를 열어주세요.
+풀 리퀘스트도 환영합니다!
+
+## 라이선스
+이 프로젝트는 MIT 라이선스 하에 있습니다.
+
+</README.md>
+
+
+
+
+<main.py>
+
+import tkinter as tk
+from tkinter import messagebox
+from ui_manager import UIManager
+from conversation_manager import ConversationManager  # SessionManager가 아닌 ConversationManager 사용
+from config_manager import ConfigManager
+from utils import decrypt_api_key
+import logging
+import sys
+import os
+from dotenv import load_dotenv
+import asyncio
+import tracemalloc
+
+# tracemalloc 시작
+tracemalloc.start()
+
+# 로깅 설정
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('chat_app.log')
+    ]
+)
+logger = logging.getLogger(__name__)
+
+class ChatApp:
+    def __init__(self, master):
+        """
+        채팅 애플리케이션을 초기화합니다.
+        
+        Args:
+            master: 메인 tkinter 윈도우
+        """
+        self.master = master
+        
+        # 환경 변수 로드
+        logger.info("Loading environment variables...")
+        load_dotenv()
+        
+        # API 키 복호화 시도
+        try:
+            logger.info("Attempting to decrypt API key...")
+            api_key = decrypt_api_key()
+            os.environ['ANTHROPIC_API_KEY'] = api_key
+            logger.info("API key successfully decrypted and set")
+        except Exception as e:
+            logger.error(f"Failed to decrypt API key: {str(e)}")
+            self.show_error(f"API 키 복호화 중 오류 발생: {str(e)}")
+            self.master.destroy()
+            return
+            
+        try:
+            # 설정 로드
+            logger.info("Loading configuration...")
+            self.config = ConfigManager.load_config()
+            
+            # 대화 관리자 초기화
+            logger.info("Initializing conversation manager...")
+            self.conversation_manager = ConversationManager()
+            
+            # UI 매니저 초기화
+            logger.info("Initializing UI manager...")
+            self.ui_manager = UIManager(master, self.config, self.conversation_manager)
+            self.ui_manager.chat_app = self
+            
+            # 윈도우 설정
+            logger.info("Setting up window...")
+            self.setup_window()
+            
+            logger.info("Application initialization complete")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize application: {str(e)}", exc_info=True)
+            self.show_error(f"애플리케이션 초기화 중 오류 발생: {str(e)}")
+            self.master.destroy()
+            return
+
+    def setup_window(self):
+        """윈도우 설정을 초기화합니다."""
+        # 기본 윈도우 크기 설정
+        if 'window_size' in self.config:
+            self.master.geometry(self.config['window_size'])
+            
+        # 종료 프로토콜 설정
+        self.master.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
+        # 윈도우 제목 설정
+        self.master.title("Claude Chat Application")
+
+    def show_error(self, message: str):
+        """
+        에러 메시지를 표시합니다.
+        
+        Args:
+            message (str): 표시할 에러 메시지
+        """
+        logger.error(message)
+        messagebox.showerror("Error", message)
+
+    def on_closing(self):
+        """애플리케이션 종료 시 처리할 작업을 수행합니다."""
+        try:
+            logger.info("Starting application shutdown...")
+            # 현재 윈도우 크기 저장
+            self.config['window_size'] = f"{self.master.winfo_width()}x{self.master.winfo_height()}"
+            ConfigManager.save_config(self.config)
+            
+            # 대화 매니저 정리
+            if hasattr(self, 'conversation_manager'):
+                logger.info("Saving all conversations...")
+                self.conversation_manager.save_all_sessions()
+                
+            logger.info("Application shutdown complete")
+                
+        except Exception as e:
+            logger.error(f"Error during shutdown: {str(e)}", exc_info=True)
+        
+        finally:
+            self.master.destroy()
+
+    async def send_message_async(self, event=None):
+        """
+        메시지 전송을 비동기적으로 처리합니다.
+        
+        Args:
+            event: 이벤트 객체 (키보드 이벤트 등)
+        """
+        await self.ui_manager.send_message(event)
+
+    def send_message(self, event=None):
+        """
+        메시지 전송을 처리합니다.
+        
+        Args:
+            event: 이벤트 객체 (키보드 이벤트 등)
+        """
+        asyncio.run(self.send_message_async(event))
+        return "break"
+
+if __name__ == "__main__":
+    try:
+        logger.info("Starting application...")
+        root = tk.Tk()
+        app = ChatApp(root)
+        root.mainloop()
+    except Exception as e:
+        logger.error(f"Unhandled exception: {str(e)}", exc_info=True)
+        sys.exit(1)
+
+</main.py>
+
+
+<chat_session.py>
+import anthropic
+from anthropic import Anthropic
+from typing import List, Dict, Optional, Any, Union
+import json
+import asyncio
+from dataclasses import dataclass
+import logging
+from encryption import encrypt_data, decrypt_data
+from response_formatter import format_response
+from utils import count_tokens, decrypt_api_key
+from vision_handler import VisionHandler
+from context_manager import ContextManager
+from retry_handler import RetryHandler
+
+# 로깅 설정
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+@dataclass
+class MessageContent:
+    """메시지 내용을 표현하는 데이터 클래스"""
+    role: str
+    content: Union[str, List[Dict]]
+    metadata: Optional[Dict] = None
+
+class ChatSession:
+    """Claude API와의 대화 세션을 관리하는 클래스"""
+    
+    def __init__(self, 
+                 model: str = "claude-3-5-sonnet-20241022", 
+                 max_tokens: int = 8000, 
+                 temperature: float = 0.1,
+                 name: str = "Default Session"):
+        """
+        ChatSession 인스턴스를 초기화합니다.
+
+        Args:
+            model (str): 사용할 Claude 모델 이름
+            max_tokens (int): 최대 토큰 수
+            temperature (float): 응답의 무작위성 정도 (0.0 ~ 1.0)
+            name (str): 세션 이름
+        """
+        try:
+            api_key = decrypt_api_key()
+            self.client = Anthropic(api_key=api_key)
+        except Exception as e:
+            logger.error(f"API 클라이언트 초기화 실패: {str(e)}")
+            raise
+
+        # 기본 설정
+        self.name = name
+        self.model = model
+        self.max_tokens = max_tokens
+        self.temperature = temperature
+        
+        # 대화 관련 속성
+        self.messages: List[MessageContent] = []
+        self.total_tokens_used = 0
+        
+        # 컴포넌트 초기화
+        self.vision_handler = VisionHandler()
+        self.context_manager = ContextManager()
+        self.retry_handler = RetryHandler(max_retries=3, base_delay=1.0)
+        
+        # 기본 에러 핸들러 등록
+        self._register_default_error_handlers()
+        
+        logger.info(f"ChatSession '{name}' initialized with model {model}")
+
+    def _register_default_error_handlers(self):
+        """기본 에러 핸들러를 등록합니다."""
+        def handle_api_error(error: anthropic.APIError, attempt: int):
+            logger.warning(f"API 오류 발생 (시도 {attempt + 1}/{self.retry_handler.max_retries}): {str(error)}")
+            if error.status_code == 401:
+                logger.error("인증 오류: API 키를 확인하세요.")
+            elif error.status_code == 429:
+                logger.warning("요청 한도 초과: 잠시 후 다시 시도합니다.")
+            elif error.status_code == 500:
+                logger.error("서버 오류: Anthropic 서버에 문제가 발생했습니다.")
+
+        def handle_general_error(error: Exception, attempt: int):
+            logger.warning(f"일반 오류 발생 (시도 {attempt + 1}/{self.retry_handler.max_retries}): {str(error)}")
+
+        self.retry_handler.register_error_handler(anthropic.APIError, handle_api_error)
+        self.retry_handler.register_error_handler(Exception, handle_general_error)
+
+    def add_message(self, role: str, content: Union[str, List[Dict]], metadata: Optional[Dict] = None):
+        """
+        대화 기록에 새 메시지를 추가합니다.
+
+        Args:
+            role (str): 메시지 작성자의 역할 ('user' 또는 'assistant')
+            content (Union[str, List[Dict]]): 메시지 내용
+            metadata (Optional[Dict]): 메시지 관련 메타데이터
+        """
+        message = MessageContent(role=role, content=content, metadata=metadata)
+        self.messages.append(message)
+        logger.debug(f"Added message from {role} with content length {len(str(content))}")
+
+    async def get_response(self, user_input: str) -> str:
+        """
+        사용자 입력에 대한 Claude의 응답을 비동기적으로 가져옵니다.
+
+        Args:
+            user_input (str): 사용자 입력 메시지
+
+        Returns:
+            str: Claude의 응답 메시지
+        """
+        self.add_message("user", user_input)
+        
+        try:
+            async def make_request():
+                messages = [{"role": msg.role, "content": msg.content} for msg in self.messages]
+                response = await self.client.messages.create(
+                    model=self.model,
+                    max_tokens=self.max_tokens,
+                    temperature=self.temperature,
+                    messages=messages,
+                    system=self.context_manager.get_current_system_prompt()
+                )
+                return response.content[0].text
+
+            assistant_message = await self.retry_handler.async_retry(make_request)
+            self.add_message("assistant", assistant_message)
+            
+            # 토큰 사용량 업데이트 (근사값 사용)
+            self.total_tokens_used += count_tokens([{"role": "user", "content": user_input}])
+            self.total_tokens_used += count_tokens([{"role": "assistant", "content": assistant_message}])
+            
+            return format_response(assistant_message)
+            
+        except Exception as e:
+            error_message = f"응답 생성 중 오류 발생: {str(e)}"
+            logger.error(error_message)
+            return error_message
+
+    async def process_image_message(self, message: str, image_path: str) -> str:
+        """
+        이미지와 텍스트를 함께 처리하여 응답을 생성합니다.
+
+        Args:
+            message (str): 이미지와 함께 전송할 텍스트 메시지
+            image_path (str): 이미지 파일 경로
+
+        Returns:
+            str: Claude의 응답 메시지
+        """
+        try:
+            image_content = self.vision_handler.prepare_image_content(image_path)
+            
+            content = [
+                {'type': 'text', 'text': message},
+                image_content
+            ]
+            
+            self.add_message("user", content, {"image_path": image_path})
+            
+            async def make_request():
+                messages = [{"role": msg.role, "content": msg.content} for msg in self.messages]
+                response = await self.client.messages.create(
+                    model=self.model,
+                    max_tokens=self.max_tokens,
+                    messages=messages,
+                    system=self.context_manager.get_current_system_prompt()
+                )
+                return response.content[0].text
+
+            assistant_message = await self.retry_handler.async_retry(make_request)
+            self.add_message("assistant", assistant_message)
+            
+            return format_response(assistant_message)
+            
+        except Exception as e:
+            error_message = f"이미지 처리 중 오류 발생: {str(e)}"
+            logger.error(error_message)
+            return error_message
+
+    def save_session(self, filename: str):
+        """
+        현재 세션 상태를 파일로 저장합니다.
+
+        Args:
+            filename (str): 저장할 파일 경로
+        """
+        try:
+            data = {
+                "name": self.name,
+                "model": self.model,
+                "max_tokens": self.max_tokens,
+                "temperature": self.temperature,
+                "messages": [{"role": msg.role, "content": msg.content, "metadata": msg.metadata} 
+                           for msg in self.messages],
+                "total_tokens_used": self.total_tokens_used,
+                "active_context": self.context_manager.active_context,
+                "context_history": self.context_manager.get_context_history(),
+                "custom_contexts": {k: v for k, v in self.context_manager.system_prompts.items() 
+                                 if k not in ContextManager.DEFAULT_CONTEXTS}
+            }
+            
+            encrypted_data = encrypt_data(json.dumps(data))
+            with open(filename, 'wb') as f:
+                f.write(encrypted_data)
+                
+            logger.info(f"Session saved to {filename}")
+                
+        except Exception as e:
+            error_message = f"세션 저장 중 오류 발생: {str(e)}"
+            logger.error(error_message)
+            raise
+
+    @classmethod
+    def load_session(cls, filename: str) -> 'ChatSession':
+        """
+        저장된 세션을 로드하여 새 ChatSession 인스턴스를 생성합니다.
+
+        Args:
+            filename (str): 로드할 파일 경로
+
+        Returns:
+            ChatSession: 로드된 세션 인스턴스
+        """
+        try:
+            with open(filename, 'rb') as f:
+                encrypted_data = f.read()
+                
+            decrypted_data = decrypt_data(encrypted_data)
+            data = json.loads(decrypted_data)
+            
+            # 새 인스턴스 생성
+            session = cls(
+                model=data["model"],
+                max_tokens=data["max_tokens"],
+                temperature=data["temperature"],
+                name=data["name"]
+            )
+            
+            # 상태 복원
+            for msg_data in data["messages"]:
+                session.add_message(
+                    role=msg_data["role"],
+                    content=msg_data["content"],
+                    metadata=msg_data.get("metadata")
+                )
+            
+            session.total_tokens_used = data["total_tokens_used"]
+            
+            # 컨텍스트 복원
+            if "custom_contexts" in data:
+                for name, prompt in data["custom_contexts"].items():
+                    session.context_manager.add_custom_context(name, prompt)
+            
+            if "active_context" in data:
+                session.context_manager.set_context(data["active_context"])
+            
+            logger.info(f"Session loaded from {filename}")
+            return session
+            
+        except Exception as e:
+            error_message = f"세션 로드 중 오류 발생: {str(e)}"
+            logger.error(error_message)
+            raise
+
+    def get_token_usage(self) -> Dict[str, int]:
+        """
+        토큰 사용량 통계를 반환합니다.
+
+        Returns:
+            Dict[str, int]: 토큰 사용량 정보
+        """
+        return {
+            "total_tokens": self.total_tokens_used,
+            "available_tokens": self.max_tokens - self.total_tokens_used
+        }
+
+    def clear_context(self):
+        """현재 컨텍스트를 초기화합니다."""
+        self.context_manager.set_context("general")
+        logger.info("Context reset to general")
+
+    def __str__(self) -> str:
+        """세션의 문자열 표현을 반환합니다."""
+        return f"ChatSession(name='{self.name}', model='{self.model}', messages={len(self.messages)})"
+
+    def __repr__(self) -> str:
+        """세션의 개발자용 문자열 표현을 반환합니다."""
+        return f"ChatSession(name='{self.name}', model='{self.model}', max_tokens={self.max_tokens}, temperature={self.temperature})"
+</chat_session.py>
+
+
+
+<config_manager.py>
+import os
+import json
+from tkinter import messagebox
+
+class ConfigManager:
+    """설정을 관리하는 클래스입니다."""
+    
+    CONFIG_FILE = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'chat_config.json')
+    DEFAULT_CONFIG = {
+        'window_size': '800x600',
+        'theme': 'dark',
+        'font_size': 10,
+        'user_name': 'User'
+    }
+
+    @classmethod
+    def load_config(cls):
+        """
+        설정 파일을 로드합니다.
+        파일이 없거나 오류가 있는 경우 기본 설정을 반환합니다.
+        
+        Returns:
+            dict: 설정 딕셔너리
+        """
+        try:
+            if os.path.exists(cls.CONFIG_FILE):
+                with open(cls.CONFIG_FILE, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+        except json.JSONDecodeError:
+            messagebox.showerror("Error", "설정 파일 형식이 올바르지 않습니다. 기본 설정을 사용합니다.")
+        except IOError as e:
+            messagebox.showerror("Error", f"설정 파일을 읽는 중 오류가 발생했습니다: {e}")
+        return cls.DEFAULT_CONFIG.copy()
+
+    @classmethod
+    def save_config(cls, config):
+        """
+        설정을 파일에 저장합니다.
+        
+        Args:
+            config (dict): 저장할 설정 딕셔너리
+        """
+        try:
+            with open(cls.CONFIG_FILE, 'w', encoding='utf-8') as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
+        except IOError as e:
+            messagebox.showerror("Error", f"설정 파일을 저장하는 중 오류가 발생했습니다: {e}")
+
+</config_manager.py>
+
+
+
+<context_manager.py>
+from typing import Dict, List, Optional
+import logging
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+class ContextManager:
+    """대화 컨텍스트와 시스템 프롬프트를 관리하는 클래스"""
+    
+    DEFAULT_CONTEXTS = {
+        "general": "You are Claude, a helpful AI assistant.",
+        "code_review": """You are a skilled Python developer tasked with reviewing and improving code.
+                         Focus on identifying bugs, suggesting optimizations, and ensuring best practices.
+                         Use clear explanations and provide specific code examples.""",
+        "teacher": """You are an expert teacher, skilled at explaining complex concepts in simple terms.
+                     Break down difficult topics into understandable parts and use relevant examples.
+                     Encourage questions and provide step-by-step explanations.""",
+        "translator": """You are a professional translator with expertise in multiple languages.
+                        Provide accurate translations while maintaining context and nuance.
+                        Explain cultural context when relevant.""",
+        "writer": """You are a creative writer, skilled in various writing styles and formats.
+                    Help with writing, editing, and improving text content.
+                    Provide constructive feedback and suggestions."""
+    }
+
+    def __init__(self):
+        """
+        ContextManager 인스턴스를 초기화합니다.
+        기본 컨텍스트들을 복사하고 초기 상태를 설정합니다.
+        """
+        self.system_prompts: Dict[str, str] = self.DEFAULT_CONTEXTS.copy()
+        self.active_context: str = "general"
+        self.context_history: List[dict] = []
+        self.max_history: int = 10
+        self.last_change: datetime = datetime.now()
+
+        logger.info("Context manager initialized with default contexts")
+
+    def set_context(self, context_type: str) -> str:
+        """
+        컨텍스트를 변경하고 해당하는 시스템 프롬프트를 반환합니다.
+
+        Args:
+            context_type (str): 변경할 컨텍스트 타입
+
+        Returns:
+            str: 설정된 시스템 프롬프트
+
+        Raises:
+            ValueError: 존재하지 않는 컨텍스트 타입인 경우
+        """
+        if context_type not in self.system_prompts:
+            error_msg = f"Unknown context type: {context_type}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
+        self.active_context = context_type
+        self.last_change = datetime.now()
+        
+        # 컨텍스트 변경 기록 추가
+        self.context_history.append({
+            'context': context_type,
+            'timestamp': self.last_change
+        })
+        
+        # 최대 히스토리 개수 유지
+        if len(self.context_history) > self.max_history:
+            self.context_history.pop(0)
+            
+        logger.info(f"Context changed to: {context_type}")
+        return self.get_current_system_prompt()
+
+    def get_current_system_prompt(self) -> str:
+        """
+        현재 활성화된 컨텍스트의 시스템 프롬프트를 반환합니다.
+
+        Returns:
+            str: 현재 시스템 프롬프트
+        """
+        return self.system_prompts[self.active_context]
+
+    def add_custom_context(self, name: str, prompt: str) -> None:
+        """
+        새로운 커스텀 컨텍스트를 추가합니다.
+
+        Args:
+            name (str): 새 컨텍스트의 이름
+            prompt (str): 새 컨텍스트의 시스템 프롬프트
+
+        Raises:
+            ValueError: 기본 컨텍스트를 덮어쓰려고 할 경우
+        """
+        if name in self.DEFAULT_CONTEXTS:
+            error_msg = f"Cannot override default context: {name}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+            
+        self.system_prompts[name] = prompt
+        logger.info(f"Added new custom context: {name}")
+
+    def remove_custom_context(self, name: str) -> None:
+        """
+        커스텀 컨텍스트를 제거합니다.
+
+        Args:
+            name (str): 제거할 컨텍스트의 이름
+
+        Raises:
+            ValueError: 기본 컨텍스트를 제거하려고 하거나 존재하지 않는 컨텍스트인 경우
+        """
+        if name in self.DEFAULT_CONTEXTS:
+            error_msg = f"Cannot remove default context: {name}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+            
+        if name not in self.system_prompts:
+            error_msg = f"Context not found: {name}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+            
+        del self.system_prompts[name]
+        
+        # 제거된 컨텍스트가 현재 활성 컨텍스트인 경우 general로 변경
+        if self.active_context == name:
+            self.set_context("general")
+            
+        logger.info(f"Removed custom context: {name}")
+
+    def get_context_history(self) -> List[dict]:
+        """
+        컨텍스트 변경 히스토리를 반환합니다.
+
+        Returns:
+            List[dict]: 컨텍스트 변경 히스토리
+        """
+        return self.context_history.copy()
+
+    def get_available_contexts(self) -> List[str]:
+        """
+        사용 가능한 모든 컨텍스트 목록을 반환합니다.
+
+        Returns:
+            List[str]: 사용 가능한 컨텍스트 이름 목록
+        """
+        return list(self.system_prompts.keys())
+
+    def get_context_details(self, context_name: str) -> Optional[dict]:
+        """
+        특정 컨텍스트의 상세 정보를 반환합니다.
+
+        Args:
+            context_name (str): 조회할 컨텍스트 이름
+
+        Returns:
+            Optional[dict]: 컨텍스트 정보 또는 None
+        """
+        if context_name not in self.system_prompts:
+            return None
+            
+        return {
+            'name': context_name,
+            'prompt': self.system_prompts[context_name],
+            'is_default': context_name in self.DEFAULT_CONTEXTS,
+            'is_active': context_name == self.active_context
+        }
+
+    def reset_to_default(self) -> None:
+        """
+        모든 커스텀 컨텍스트를 제거하고 기본 상태로 초기화합니다.
+        """
+        self.system_prompts = self.DEFAULT_CONTEXTS.copy()
+        self.active_context = "general"
+        self.context_history = []
+        self.last_change = datetime.now()
+        logger.info("Context manager reset to default state")
+
+</context_manager.py>
+
+
+
+
+<conversation_manager.py>
+import os
+import json
+from typing import Dict, Optional, List
+from chat_session import ChatSession
+from encryption import encrypt_data, decrypt_data
+import logging
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+class ConversationManager:
+    """대화 세션들을 관리하는 클래스"""
+    
+    def __init__(self, storage_dir: str = "conversations"):
+        """
+        대화 관리자를 초기화합니다.
+        
+        Args:
+            storage_dir: 대화 저장 디렉토리 경로
+        """
+        self.storage_dir = storage_dir
+        self.sessions: Dict[str, ChatSession] = {}
+        self.current_session: Optional[str] = None
+        self.last_active: Dict[str, datetime] = {}
+
+        # 스토리지 디렉토리 생성
+        if not os.path.exists(storage_dir):
+            os.makedirs(storage_dir)
+            logger.info(f"Created storage directory: {storage_dir}")
+
+        # 저장된 세션들 로드
+        self.load_all_sessions()
+        
+        # 기본 세션이 없으면 생성
+        if not self.sessions:
+            self.create_new_session("Default Session")
+            logger.info("Created default session")
+
+    def create_new_session(self, session_name: str) -> ChatSession:
+        """
+        새로운 세션을 생성합니다.
+        
+        Args:
+            session_name: 새 세션의 이름
+            
+        Returns:
+            ChatSession: 생성된 세션 객체
+            
+        Raises:
+            ValueError: 동일한 이름의 세션이 이미 존재할 경우
+        """
+        if session_name in self.sessions:
+            raise ValueError(f"Session '{session_name}' already exists")
+        
+        new_session = ChatSession(name=session_name)
+        self.sessions[session_name] = new_session
+        self.last_active[session_name] = datetime.now()
+        
+        # 첫 세션이거나 현재 세션이 없는 경우 현재 세션으로 설정
+        if self.current_session is None:
+            self.current_session = session_name
+            
+        logger.info(f"Created new session: {session_name}")
+        return new_session
+
+    def get_current_session(self) -> ChatSession:
+        """
+        현재 활성화된 세션을 반환합니다.
+        세션이 없는 경우 새로 생성합니다.
+        
+        Returns:
+            ChatSession: 현재 활성화된 세션
+        """
+        if self.current_session is None or self.current_session not in self.sessions:
+            self.create_new_session("Default Session")
+            logger.info("Created new default session as current session was invalid")
+            
+        session = self.sessions[self.current_session]
+        self.last_active[self.current_session] = datetime.now()
+        return session
+
+    def switch_session(self, session_name: str) -> ChatSession:
+        """
+        지정된 세션으로 전환합니다.
+        
+        Args:
+            session_name: 전환할 세션의 이름
+            
+        Returns:
+            ChatSession: 전환된 세션 객체
+            
+        Raises:
+            ValueError: 존재하지 않는 세션인 경우
+        """
+        if session_name not in self.sessions:
+            raise ValueError(f"Session '{session_name}' not found")
+        
+        self.current_session = session_name
+        self.last_active[session_name] = datetime.now()
+        logger.info(f"Switched to session: {session_name}")
+        return self.sessions[session_name]
+
+    def list_sessions(self) -> List[str]:
+        """
+        세션 목록을 반환합니다.
+        
+        Returns:
+            List[str]: 세션 이름 목록
+        """
+        return sorted(self.sessions.keys())
+
+    def get_session_info(self, session_name: str) -> dict:
+        """
+        세션의 상세 정보를 반환합니다.
+        
+        Args:
+            session_name: 정보를 조회할 세션 이름
+            
+        Returns:
+            dict: 세션 정보 (이름, 메시지 수, 마지막 활성 시간 등)
+            
+        Raises:
+            ValueError: 존재하지 않는 세션인 경우
+        """
+        if session_name not in self.sessions:
+            raise ValueError(f"Session '{session_name}' not found")
+            
+        session = self.sessions[session_name]
+        return {
+            'name': session_name,
+            'message_count': len(session.messages),
+            'last_active': self.last_active[session_name],
+            'is_current': session_name == self.current_session,
+            'context': session.context_manager.active_context
+        }
+
+    def rename_session(self, old_name: str, new_name: str) -> None:
+        """
+        세션의 이름을 변경합니다.
+        
+        Args:
+            old_name: 현재 세션 이름
+            new_name: 새로운 세션 이름
+            
+        Raises:
+            ValueError: 원래 세션이 없거나 새 이름의 세션이 이미 존재하는 경우
+        """
+        if old_name not in self.sessions:
+            raise ValueError(f"Session '{old_name}' not found")
+        if new_name in self.sessions:
+            raise ValueError(f"Session '{new_name}' already exists")
+            
+        self.sessions[new_name] = self.sessions.pop(old_name)
+        self.last_active[new_name] = self.last_active.pop(old_name)
+        
+        if self.current_session == old_name:
+            self.current_session = new_name
+            
+        # 파일 이름도 변경
+        old_path = os.path.join(self.storage_dir, f"{old_name}.enc")
+        new_path = os.path.join(self.storage_dir, f"{new_name}.enc")
+        if os.path.exists(old_path):
+            os.rename(old_path, new_path)
+            
+        logger.info(f"Renamed session from '{old_name}' to '{new_name}'")
+
+    def delete_session(self, session_name: Optional[str] = None) -> None:
+        """
+        세션을 삭제합니다.
+        
+        Args:
+            session_name: 삭제할 세션의 이름. None인 경우 현재 세션 삭제
+            
+        Raises:
+            ValueError: 삭제할 세션이 없는 경우
+        """
+        if session_name is None:
+            session_name = self.current_session
+            
+        if session_name not in self.sessions:
+            raise ValueError(f"Session '{session_name}' not found")
+            
+        # 마지막 세션은 삭제할 수 없음
+        if len(self.sessions) == 1:
+            raise ValueError("Cannot delete the last session")
+            
+        # 파일 삭제
+        file_path = os.path.join(self.storage_dir, f"{session_name}.enc")
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            
+        # 세션 객체 삭제
+        del self.sessions[session_name]
+        del self.last_active[session_name]
+        
+        # 현재 세션이 삭제된 경우 다른 세션으로 전환
+        if self.current_session == session_name:
+            self.current_session = next(iter(self.sessions))
+            
+        logger.info(f"Deleted session: {session_name}")
+
+    def save_session(self, session_name: str) -> None:
+        """
+        세션을 파일에 저장합니다.
+        
+        Args:
+            session_name: 저장할 세션의 이름
+            
+        Raises:
+            ValueError: 존재하지 않는 세션인 경우
+        """
+        if session_name not in self.sessions:
+            raise ValueError(f"Session '{session_name}' not found")
+            
+        session = self.sessions[session_name]
+        file_path = os.path.join(self.storage_dir, f"{session_name}.enc")
+        
+        try:
+            # 세션 데이터 준비
+            session_data = {
+                "name": session_name,
+                "messages": [msg.__dict__ for msg in session.messages],
+                "context": session.context_manager.active_context,
+                "last_active": self.last_active[session_name].isoformat()
+            }
+            
+            # 데이터 암호화 및 저장
+            encrypted_data = encrypt_data(json.dumps(session_data))
+            with open(file_path, 'wb') as f:
+                f.write(encrypted_data)
+                
+            logger.info(f"Saved session: {session_name}")
+                
+        except Exception as e:
+            logger.error(f"Failed to save session '{session_name}': {str(e)}")
+            raise
+
+    def load_session(self, session_name: str) -> ChatSession:
+        """
+        저장된 세션을 로드합니다.
+        
+        Args:
+            session_name: 로드할 세션의 이름
+            
+        Returns:
+            ChatSession: 로드된 세션 객체
+            
+        Raises:
+            FileNotFoundError: 세션 파일이 없는 경우
+        """
+        file_path = os.path.join(self.storage_dir, f"{session_name}.enc")
+        
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Session file for '{session_name}' not found")
+        
+        try:
+            with open(file_path, 'rb') as f:
+                encrypted_data = f.read()
+                
+            decrypted_data = decrypt_data(encrypted_data)
+            session_data = json.loads(decrypted_data)
+            
+            new_session = ChatSession(name=session_name)
+            
+            # 메시지 복원
+            for message_data in session_data['messages']:
+                new_session.add_message(
+                    role=message_data['role'],
+                    content=message_data['content']
+                )
+                    
+            # 컨텍스트 복원
+            if 'context' in session_data:
+                new_session.context_manager.set_context(session_data['context'])
+                
+            # 마지막 활성 시간 복원
+            self.last_active[session_name] = datetime.fromisoformat(
+                session_data.get('last_active', datetime.now().isoformat())
+            )
+                
+            self.sessions[session_name] = new_session
+            logger.info(f"Loaded session: {session_name}")
+            return new_session
+            
+        except Exception as e:
+            logger.error(f"Failed to load session '{session_name}': {str(e)}")
+            raise
+
+    def save_all_sessions(self) -> None:
+        """모든 세션을 저장합니다."""
+        for session_name in self.sessions:
+            try:
+                self.save_session(session_name)
+            except Exception as e:
+                logger.error(f"Failed to save session '{session_name}': {str(e)}")
+
+    def load_all_sessions(self) -> None:
+        """저장된 모든 세션을 로드합니다."""
+        if os.path.exists(self.storage_dir):
+            for filename in os.listdir(self.storage_dir):
+                if filename.endswith('.enc'):
+                    session_name = filename[:-4]  # .enc 제거
+                    try:
+                        self.load_session(session_name)
+                    except Exception as e:
+                        logger.error(f"Failed to load session '{session_name}': {str(e)}")
+
+    def cleanup_old_sessions(self, days: int = 30) -> None:
+        """
+        오래된 세션들을 정리합니다.
+        
+        Args:
+            days: 이 일수보다 오래된 세션들을 삭제
+        """
+        current_time = datetime.now()
+        sessions_to_delete = []
+        
+        for session_name, last_active in self.last_active.items():
+            if (current_time - last_active).days > days:
+                sessions_to_delete.append(session_name)
+                
+        for session_name in sessions_to_delete:
+            try:
+                self.delete_session(session_name)
+                logger.info(f"Cleaned up old session: {session_name}")
+            except Exception as e:
+                logger.error(f"Failed to cleanup session '{session_name}': {str(e)}")
+</conversation_manager.py>
+
+
+
+<encryption.py>
+# src/encryption.py
+
+from cryptography.fernet import Fernet
+import os
+from dotenv import load_dotenv
+
+load_dotenv()  # .env 파일에서 환경 변수 로드
+
+# 환경 변수에서 암호화 키 가져오기
+ENCRYPTION_KEY = os.getenv('ENCRYPTION_KEY')
+
+if not ENCRYPTION_KEY:
+    raise ValueError("ENCRYPTION_KEY가 설정되지 않았습니다. .env 파일을 확인하세요.")
+
+# Fernet 인스턴스 생성
+fernet = Fernet(ENCRYPTION_KEY.encode())
+
+def encrypt_data(data: str) -> bytes:
+    """문자열 데이터를 암호화합니다."""
+    return fernet.encrypt(data.encode())
+
+def decrypt_data(encrypted_data: bytes) -> str:
+    """암호화된 바이트 데이터를 복호화하여 문자열로 반환합니다."""
+    return fernet.decrypt(encrypted_data).decode()
+
+</encryption.py>
+
+
+
+
+
+<response_formatter.py>
+# src/response_formatter.py
+
+import re
+from pygments import highlight
+from pygments.lexers import get_lexer_by_name
+from pygments.formatters import TerminalFormatter
+
+def format_response(response: str) -> str:
+    """
+    Claude의 응답을 포맷팅합니다.
+    - 코드 블록에 구문 강조를 적용합니다.
+    - 마크다운 형식을 간단히 처리합니다.
+    """
+    # 코드 블록 처리
+    def replace_code_block(match):
+        language = match.group(1) or 'text'
+        code = match.group(2)
+        lexer = get_lexer_by_name(language, stripall=True)
+        formatted_code = highlight(code, lexer, TerminalFormatter())
+        return f"\n{formatted_code}\n"
+
+    response = re.sub(r'```(\w+)?\n([\s\S]+?)\n```', replace_code_block, response)
+
+    # 간단한 마크다운 처리
+    response = re.sub(r'\*\*(.*?)\*\*', '\033[1m\\1\033[0m', response)  # 볼드 처리
+    response = re.sub(r'\*(.*?)\*', '\033[3m\\1\033[0m', response)  # 이탤릭 처리
+
+    return response
+
+</response_formatter.py>
+
+
+
+<retry_handler.py>
+import asyncio
+import time
+from typing import Callable, Any, Dict, Type, Optional, Union
+from functools import wraps
+import logging
+import random
+from anthropic import APIError
+
+logger = logging.getLogger(__name__)
+
+class RetryHandler:
+    """API 호출 재시도 및 에러 처리를 담당하는 클래스"""
+    
+    def __init__(self, 
+                 max_retries: int = 3, 
+                 base_delay: float = 1.0,
+                 max_delay: float = 60.0,
+                 exponential_base: float = 2.0):
+        """
+        RetryHandler 인스턴스를 초기화합니다.
+
+        Args:
+            max_retries (int): 최대 재시도 횟수
+            base_delay (float): 기본 대기 시간(초)
+            max_delay (float): 최대 대기 시간(초)
+            exponential_base (float): 지수 백오프의 기본값
+        """
+        self.max_retries = max_retries
+        self.base_delay = base_delay
+        self.max_delay = max_delay
+        self.exponential_base = exponential_base
+        self.error_handlers: Dict[Type[Exception], Callable] = {}
+        
+        # 기본 에러 핸들러 등록
+        self._register_default_handlers()
+        
+        logger.info(f"RetryHandler initialized with max_retries={max_retries}, "
+                   f"base_delay={base_delay}, max_delay={max_delay}")
+
+    def _register_default_handlers(self):
+        """기본 에러 핸들러들을 등록합니다."""
+        def handle_api_rate_limit(error: APIError, attempt: int):
+            """API 속도 제한 에러 처리"""
+            logger.warning(f"Rate limit exceeded (attempt {attempt + 1}/{self.max_retries}). "
+                         f"Waiting before retry...")
+
+        def handle_api_server_error(error: APIError, attempt: int):
+            """API 서버 에러 처리"""
+            logger.error(f"Server error occurred (attempt {attempt + 1}/{self.max_retries}): "
+                        f"{str(error)}")
+
+        def handle_network_error(error: Exception, attempt: int):
+            """네트워크 관련 에러 처리"""
+            logger.warning(f"Network error occurred (attempt {attempt + 1}/{self.max_retries}): "
+                         f"{str(error)}")
+
+        self.register_error_handler(APIError, handle_api_rate_limit, 
+                                  error_codes=[429])
+        self.register_error_handler(APIError, handle_api_server_error, 
+                                  error_codes=[500, 502, 503, 504])
+        self.register_error_handler((ConnectionError, TimeoutError), 
+                                  handle_network_error)
+
+    def register_error_handler(self, 
+                             error_type: Union[Type[Exception], tuple],
+                             handler: Callable,
+                             error_codes: Optional[list] = None) -> None:
+        """
+        특정 에러 타입에 대한 핸들러를 등록합니다.
+
+        Args:
+            error_type: 처리할 예외 타입 또는 타입들의 튜플
+            handler: 에러 처리 함수
+            error_codes: APIError의 경우 처리할 에러 코드 목록
+        """
+        if error_codes:
+            original_handler = handler
+            def code_specific_handler(error: APIError, attempt: int):
+                if hasattr(error, 'status_code') and error.status_code in error_codes:
+                    return original_handler(error, attempt)
+            handler = code_specific_handler
+            
+        self.error_handlers[error_type] = handler
+        logger.debug(f"Registered error handler for {error_type}")
+
+    def calculate_delay(self, 
+                       attempt: int, 
+                       error: Optional[Exception] = None,
+                       jitter: bool = True) -> float:
+        """
+        재시도 대기 시간을 계산합니다.
+
+        Args:
+            attempt: 현재 시도 횟수
+            error: 발생한 예외 객체
+            jitter: 무작위성 추가 여부
+
+        Returns:
+            float: 계산된 대기 시간(초)
+        """
+        # 기본 지수 백오프 계산
+        delay = min(
+            self.base_delay * (self.exponential_base ** attempt),
+            self.max_delay
+        )
+        
+        # API 속도 제한의 경우 서버가 제공하는 대기 시간 사용
+        if isinstance(error, APIError) and error.status_code == 429:
+            retry_after = getattr(error, 'retry_after', None)
+            if retry_after:
+                delay = float(retry_after)
+
+        # 지터 추가
+        if jitter:
+            delay *= (0.5 + random.random())
+            
+        return delay
+
+    def is_retryable_error(self, error: Exception) -> bool:
+        """
+        재시도 가능한 에러인지 확인합니다.
+
+        Args:
+            error: 확인할 예외 객체
+
+        Returns:
+            bool: 재시도 가능하면 True, 아니면 False
+        """
+        # API 에러 처리
+        if isinstance(error, APIError):
+            return error.status_code in [429, 500, 502, 503, 504]
+            
+        # 네트워크 관련 에러 처리
+        if isinstance(error, (ConnectionError, TimeoutError)):
+            return True
+            
+        # 에러 핸들러가 등록된 에러 타입 처리
+        for error_type in self.error_handlers:
+            if isinstance(error, error_type):
+                return True
+                
+        return False
+
+    async def async_retry(self, 
+                         func: Callable, 
+                         *args, 
+                         custom_max_retries: Optional[int] = None,
+                         **kwargs) -> Any:
+        """
+        비동기 함수에 대한 재시도 로직을 구현합니다.
+
+        Args:
+            func: 실행할 비동기 함수
+            *args: 함수에 전달할 위치 인자
+            custom_max_retries: 이 호출에 대한 커스텀 최대 재시도 횟수
+            **kwargs: 함수에 전달할 키워드 인자
+
+        Returns:
+            Any: 함수의 실행 결과
+
+        Raises:
+            Exception: 모든 재시도가 실패했을 때 마지막으로 발생한 예외
+        """
+        max_retries = custom_max_retries or self.max_retries
+        last_error = None
+        
+        for attempt in range(max_retries):
+            try:
+                return await func(*args, **kwargs)
+                
+            except Exception as e:
+                last_error = e
+                
+                # 에러 핸들러 실행
+                for error_type, handler in self.error_handlers.items():
+                    if isinstance(e, error_type):
+                        handler(e, attempt)
+                        break
+                
+                # 재시도 불가능한 에러면 즉시 종료
+                if not self.is_retryable_error(e):
+                    logger.error(f"Non-retryable error occurred: {str(e)}")
+                    raise
+
+                if attempt == max_retries - 1:
+                    logger.error(f"All retry attempts failed: {str(e)}")
+                    raise last_error
+
+                # 대기 시간 계산 및 대기
+                delay = self.calculate_delay(attempt, error=e)
+                logger.info(f"Waiting {delay:.2f} seconds before retry...")
+                await asyncio.sleep(delay)
+        
+        raise last_error
+
+    def retry(self, 
+              custom_max_retries: Optional[int] = None,
+              custom_base_delay: Optional[float] = None) -> Callable:
+        """
+        동기 함수에 대한 재시도 데코레이터를 제공합니다.
+
+        Args:
+            custom_max_retries: 커스텀 최대 재시도 횟수
+            custom_base_delay: 커스텀 기본 대기 시간
+
+        Returns:
+            Callable: 재시도 로직이 추가된 래퍼 함수
+        """
+        def decorator(func: Callable) -> Callable:
+            @wraps(func)
+            def wrapper(*args, **kwargs) -> Any:
+                max_retries = custom_max_retries or self.max_retries
+                base_delay = custom_base_delay or self.base_delay
+                last_error = None
+                
+                for attempt in range(max_retries):
+                    try:
+                        return func(*args, **kwargs)
+                        
+                    except Exception as e:
+                        last_error = e
+                        
+                        # 에러 핸들러 실행
+                        for error_type, handler in self.error_handlers.items():
+                            if isinstance(e, error_type):
+                                handler(e, attempt)
+                                break
+                        
+                        # 재시도 불가능한 에러면 즉시 종료
+                        if not self.is_retryable_error(e):
+                            logger.error(f"Non-retryable error occurred: {str(e)}")
+                            raise
+
+                        if attempt == max_retries - 1:
+                            logger.error(f"All retry attempts failed: {str(e)}")
+                            raise last_error
+
+                        # 대기 시간 계산 및 대기
+                        delay = self.calculate_delay(
+                            attempt, 
+                            error=e, 
+                            jitter=True
+                        )
+                        logger.info(f"Waiting {delay:.2f} seconds before retry...")
+                        time.sleep(delay)
+                
+                raise last_error
+                
+            return wrapper
+        return decorator
+
+    def __call__(self, func: Callable) -> Callable:
+        """
+        클래스를 직접 데코레이터로 사용할 수 있게 합니다.
+
+        Args:
+            func: 데코레이트할 함수
+
+        Returns:
+            Callable: 재시도 로직이 추가된 래퍼 함수
+        """
+        return self.retry()(func)
+
+</retry_handler.py>
+
+
+
+<ui_manager.py>
+import tkinter as tk
+from tkinter import scrolledtext, filedialog, ttk, simpledialog, messagebox
+from tkinter import font as tkfont
+import platform
+import asyncio
+from typing import Optional, Callable, Any
+from concurrent.futures import ThreadPoolExecutor
+import logging
+
+logger = logging.getLogger(__name__)
+
+class UIManager:
+    """사용자 인터페이스를 관리하는 클래스"""
+    
+    def __init__(self, master: tk.Tk, config: dict, conversation_manager: Any):
+        """
+        UI 매니저를 초기화합니다.
+        
+        Args:
+            master: 메인 윈도우
+            config: 설정 딕셔너리
+            conversation_manager: 대화 관리자 인스턴스
+        """
+        self.master = master
+        self.config = config
+        self.conversation_manager = conversation_manager
+        self.chat_app = None  # ChatApp 인스턴스는 나중에 설정됨
+        self.executor = ThreadPoolExecutor(max_workers=1)
+        self.current_image = None
+        
+        # UI 생성
+        self.create_widgets()
+        self.apply_theme(config['theme'])
+        self.update_font_size()
+        self.update_window_title()
+        self.bind_shortcuts()
+        
+        # 초기 세션 표시
+        self.update_chat_display()
+        
+        logger.info("UI Manager initialized successfully")
+
+    def create_widgets(self):
+        """모든 UI 위젯을 생성하고 배치합니다."""
+        # 기본 그리드 설정
+        self.master.grid_columnconfigure(0, weight=1)
+        self.master.grid_rowconfigure(1, weight=1)
+
+        self.create_settings_frame()
+        self.create_chat_area()
+        self.create_input_area()
+        self.create_status_bar()
+
+    def create_settings_frame(self):
+        """설정 프레임을 생성합니다."""
+        self.settings_frame = tk.Frame(self.master)
+        self.settings_frame.grid(row=0, column=0, sticky="ew", padx=10, pady=5)
+        self.settings_frame.grid_columnconfigure(0, weight=1)
+
+        # 버튼 프레임
+        self.buttons_frame = tk.Frame(self.settings_frame)
+        self.buttons_frame.grid(row=0, column=0, sticky="w")
+
+        # 테마 버튼
+        self.theme_button = tk.Button(
+            self.buttons_frame,
+            text="Light Mode" if self.config['theme'] == 'dark' else "Dark Mode",
+            command=self.toggle_theme
+        )
+        self.theme_button.grid(row=0, column=0, padx=5, pady=2)
+
+        # 폰트 크기 설정
+        self.font_size_label = tk.Label(self.buttons_frame, text="Font Size:")
+        self.font_size_label.grid(row=0, column=1, padx=5, pady=2)
+
+        self.font_size_var = tk.StringVar(value=str(self.config['font_size']))
+        self.font_size_entry = tk.Entry(
+            self.buttons_frame,
+            textvariable=self.font_size_var,
+            width=3
+        )
+        self.font_size_entry.grid(row=0, column=2, padx=5, pady=2)
+        self.font_size_entry.bind('<Return>', self.update_font_size)
+
+        # 대화 저장 버튼
+        self.save_button = tk.Button(
+            self.buttons_frame,
+            text="Save Chat",
+            command=self.save_chat
+        )
+        self.save_button.grid(row=0, column=3, padx=5, pady=2)
+
+        # 세션 관리 프레임
+        self.create_session_frame()
+
+    def create_session_frame(self):
+        """세션 관리 프레임을 생성합니다."""
+        self.session_frame = tk.Frame(self.settings_frame)
+        self.session_frame.grid(row=1, column=0, sticky="w", pady=2)
+
+        # 세션 선택 콤보박스
+        self.session_combo = ttk.Combobox(
+            self.session_frame,
+            values=self.conversation_manager.list_sessions()
+        )
+        self.session_combo.grid(row=0, column=0, padx=5)
+        
+        # 현재 세션 설정
+        current_session = self.conversation_manager.current_session
+        if current_session:
+            self.session_combo.set(current_session)
+        
+        self.session_combo.bind("<<ComboboxSelected>>", self.change_session)
+
+        # 세션 관리 버튼들
+        self.new_session_button = tk.Button(
+            self.session_frame,
+            text="New Session",
+            command=self.new_session
+        )
+        self.new_session_button.grid(row=0, column=1, padx=5)
+
+        self.rename_button = tk.Button(
+            self.session_frame,
+            text="Rename Session",
+            command=self.rename_session
+        )
+        self.rename_button.grid(row=0, column=2, padx=5)
+
+        self.delete_button = tk.Button(
+            self.session_frame,
+            text="Delete Session",
+            command=self.delete_session
+        )
+        self.delete_button.grid(row=0, column=3, padx=5)
+
+    def create_chat_area(self):
+        """채팅 영역을 생성합니다."""
+        self.chat_box = scrolledtext.ScrolledText(
+            self.master,
+            wrap=tk.WORD,
+            width=60,
+            height=20
+        )
+        self.chat_box.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+        self.chat_box.config(state=tk.DISABLED)
+
+        # 마우스 우클릭 메뉴
+        self.chat_box_context_menu = tk.Menu(self.chat_box, tearoff=0)
+        self.chat_box_context_menu.add_command(label="Copy", command=self.copy_chat)
+        self.chat_box.bind("<Button-3>", self.show_chat_context_menu)
+
+    def create_input_area(self):
+        """입력 영역을 생성합니다."""
+        self.input_frame = tk.Frame(self.master)
+        self.input_frame.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 10))
+        self.input_frame.grid_columnconfigure(0, weight=1)
+
+        # 입력 창
+        self.input_box = tk.Text(
+            self.input_frame,
+            wrap=tk.WORD,
+            height=3
+        )
+        self.input_box.grid(row=0, column=0, rowspan=2, sticky="nsew")
+        self.input_box.bind("<Return>", self.handle_return)
+        self.input_box.bind("<Shift-Return>", self.insert_newline)
+        self.input_box.focus_set()
+
+        # 전송 버튼
+        button_height = self.input_box.winfo_reqheight() // 2
+        self.send_button = tk.Button(
+            self.input_frame,
+            text="Send",
+            command=self.send_message,
+            height=1
+        )
+        self.send_button.grid(row=0, column=1, padx=(5, 0), pady=(0, 2))
+
+        # 이미지 첨부 버튼
+        self.attach_button = tk.Button(
+            self.input_frame,
+            text="Attach",
+            command=self.attach_file,
+            height=1
+        )
+        self.attach_button.grid(row=1, column=1, padx=(5, 0), pady=(2, 0))
+
+    def create_status_bar(self):
+        """상태 바를 생성합니다."""
+        self.status_bar = tk.Label(
+            self.master,
+            text="Ready",
+            bd=1,
+            relief=tk.SUNKEN,
+            anchor=tk.W
+        )
+        self.status_bar.grid(row=3, column=0, sticky="ew")
+
+    async def send_message(self, event=None):
+        """
+        메시지를 전송합니다.
+        
+        Args:
+            event: 이벤트 객체 (키보드 이벤트 등)
+        """
+        if event and event.state & 0x1:  # Shift key pressed
+            return self.insert_newline(event)
+
+        message = self.input_box.get("1.0", tk.END).strip()
+        if not message and not self.current_image:
+            return "break"
+
+        self.input_box.delete("1.0", tk.END)
+        self.set_status("Sending message...")
+
+        try:
+            current_session = self.conversation_manager.get_current_session()
+            
+            if self.current_image:
+                response = await current_session.process_image_message(
+                    message,
+                    self.current_image
+                )
+                self.current_image = None
+                self.update_image_label()
+            else:
+                response = await current_session.get_response(message)
+
+            self.display_message("You", message)
+            await self.display_response(response)
+            self.set_status("Ready")
+            
+        except Exception as e:
+            logger.error(f"Error sending message: {str(e)}", exc_info=True)
+            self.show_error(f"메시지 전송 중 오류 발생: {str(e)}")
+            self.set_status("Error occurred")
+
+        return "break"
+
+    async def display_response(self, response: str):
+        """
+        Claude의 응답을 점진적으로 표시합니다.
+        
+        Args:
+            response: 표시할 응답 텍스트
+        """
+        self.chat_box.config(state=tk.NORMAL)
+        self.chat_box.insert(tk.END, "Claude: ")
+        
+        for char in response:
+            self.chat_box.insert(tk.END, char)
+            self.chat_box.see(tk.END)
+            self.chat_box.update_idletasks()
+            await asyncio.sleep(0.001)  # 타이핑 효과를 위한 짧은 딜레이
+            
+        self.chat_box.insert(tk.END, "\n\n")
+        self.chat_box.config(state=tk.DISABLED)
+        self.chat_box.see(tk.END)
+
+    def handle_return(self, event):
+        """Return 키 입력을 처리합니다."""
+        asyncio.run(self.send_message(event))
+        return "break"
+
+    def apply_theme(self, theme: str):
+        """
+        테마를 적용합니다.
+        
+        Args:
+            theme: 적용할 테마 ('dark' 또는 'light')
+        """
+        colors = {
+            'dark': {
+                'bg': '#2b2b2b',
+                'fg': 'white',
+                'input_bg': '#383838',
+                'button_bg': '#404040',
+                'button_fg': 'white'
+            },
+            'light': {
+                'bg': 'white',
+                'fg': 'black',
+                'input_bg': '#f0f0f0',
+                'button_bg': '#e0e0e0',
+                'button_fg': 'black'
+            }
+        }[theme]
+
+        # 위젯들에 색상 적용
+        self.master.configure(bg=colors['bg'])
+        self.chat_box.config(bg=colors['bg'], fg=colors['fg'])
+        self.input_box.config(bg=colors['input_bg'], fg=colors['fg'])
+        
+        for frame in [self.settings_frame, self.buttons_frame, 
+                     self.session_frame, self.input_frame]:
+            frame.config(bg=colors['bg'])
+            
+        for button in [self.send_button, self.attach_button,
+                      self.new_session_button, self.rename_button,
+                      self.delete_button, self.save_button]:
+            button.config(bg=colors['button_bg'], fg=colors['button_fg'])
+            
+        self.theme_button.config(
+            text='Light Mode' if theme == 'dark' else 'Dark Mode',
+            bg=colors['button_bg'],
+            fg=colors['button_fg']
+        )
+        
+        for label in [self.font_size_label, self.status_bar]:
+            label.config(bg=colors['bg'], fg=colors['fg'])
+
+    def show_error(self, message: str):
+        """
+        에러 메시지를 표시합니다.
+        
+        Args:
+            message: 표시할 에러 메시지
+        """
+        logger.error(message)
+        messagebox.showerror("Error", message)
+
+    def show_info(self, message: str):
+        """
+        정보 메시지를 표시합니다.
+        
+        Args:
+            message: 표시할 정보 메시지
+        """
+        logger.info(message)
+        messagebox.showinfo("Information", message)
+
+    def set_status(self, message: str):
+        """
+        상태 바 메시지를 업데이트합니다.
+        
+        Args:
+            message: 표시할 상태 메시지
+        """
+        self.status_bar.config(text=message)
+
+</ui_manager.py>
+
+
+
+<utils.py>
+# src/utils.py
+
+import uuid
+import os
+import base64
+from typing import List, Dict
+from dotenv import load_dotenv
+from cryptography.fernet import Fernet
+
+load_dotenv()
+
+def decrypt_api_key():
+    encryption_key = os.getenv('ENCRYPTION_KEY')
+    encrypted_api_key = os.getenv('ENCRYPTED_ANTHROPIC_API_KEY')
+    
+    if not encryption_key or not encrypted_api_key:
+        raise ValueError("ENCRYPTION_KEY 또는 ENCRYPTED_ANTHROPIC_API_KEY가 설정되지 않았습니다.")
+    
+    f = Fernet(encryption_key.encode())
+    decrypted_api_key = f.decrypt(base64.b64decode(encrypted_api_key))
+    return decrypted_api_key.decode()
+
+def count_tokens(messages: List[Dict]) -> int:
+    """
+    메시지 리스트의 총 토큰 수를 대략적으로 계산합니다.
+    정확한 계산을 위해서는 실제 토크나이저를 사용해야 합니다.
+    """
+    return sum(len(msg['content'].split()) for msg in messages)
+
+def generate_message_id() -> str:
+    """
+    고유한 메시지 ID를 생성합니다.
+    """
+    return str(uuid.uuid4())
+
+def truncate_conversation(messages: List[Dict], max_tokens: int) -> List[Dict]:
+    """
+    대화 기록을 최대 토큰 수에 맞게 자릅니다.
+    """
+    truncated = []
+    current_tokens = 0
+    for message in reversed(messages):
+        message_tokens = len(message['content'].split())
+        if current_tokens + message_tokens > max_tokens:
+            break
+        truncated.insert(0, message)
+        current_tokens += message_tokens
+    return truncated
+
+</utils.py>
+
+
+
+<vision_handler.py>
+import base64
+from typing import Optional, Dict, List, Tuple
+from pathlib import Path
+import logging
+from PIL import Image
+import io
+import mimetypes
+import hashlib
+import os
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+class VisionHandler:
+    """이미지 처리 및 비전 기능을 담당하는 클래스"""
+    
+    SUPPORTED_FORMATS = {
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp'
+    }
+    
+    MAX_IMAGE_SIZE = 20 * 1024 * 1024  # 20MB
+    MAX_DIMENSION = 4096  # 최대 이미지 차원
+    CACHE_DIR = "image_cache"
+
+    def __init__(self, cache_dir: Optional[str] = None):
+        """
+        VisionHandler 인스턴스를 초기화합니다.
+
+        Args:
+            cache_dir: 이미지 캐시 디렉토리 경로
+        """
+        self.cache_dir = cache_dir or self.CACHE_DIR
+        self._ensure_cache_dir()
+        self.cache_info: Dict[str, Dict] = {}
+        logger.info("VisionHandler initialized")
+
+    def _ensure_cache_dir(self) -> None:
+        """캐시 디렉토리가 존재하는지 확인하고 없으면 생성합니다."""
+        if not os.path.exists(self.cache_dir):
+            os.makedirs(self.cache_dir)
+            logger.info(f"Created cache directory: {self.cache_dir}")
+
+    def _calculate_file_hash(self, file_path: str) -> str:
+        """
+        파일의 SHA-256 해시를 계산합니다.
+
+        Args:
+            file_path: 해시를 계산할 파일 경로
+
+        Returns:
+            str: 파일의 해시값
+        """
+        hasher = hashlib.sha256()
+        with open(file_path, 'rb') as f:
+            for chunk in iter(lambda: f.read(4096), b''):
+                hasher.update(chunk)
+        return hasher.hexdigest()
+
+    def validate_image(self, image_path: str) -> Tuple[bool, Optional[str]]:
+        """
+        이미지 파일의 유효성을 검사합니다.
+
+        Args:
+            image_path: 검사할 이미지 파일 경로
+
+        Returns:
+            Tuple[bool, Optional[str]]: (유효성 여부, 오류 메시지)
+        """
+        try:
+            path = Path(image_path)
+            
+            # 파일 존재 확인
+            if not path.exists():
+                return False, "File does not exist"
+                
+            # 확장자 확인
+            if path.suffix.lower() not in self.SUPPORTED_FORMATS:
+                return False, "Unsupported file format"
+                
+            # 파일 크기 확인
+            if path.stat().st_size > self.MAX_IMAGE_SIZE:
+                return False, "File size exceeds maximum limit"
+                
+            # 이미지 열기 시도
+            with Image.open(image_path) as img:
+                width, height = img.size
+                if width > self.MAX_DIMENSION or height > self.MAX_DIMENSION:
+                    return False, f"Image dimensions exceed {self.MAX_DIMENSION}x{self.MAX_DIMENSION}"
+                    
+            return True, None
+            
+        except Exception as e:
+            logger.error(f"Image validation error: {str(e)}")
+            return False, f"Invalid image file: {str(e)}"
+
+    def get_media_type(self, image_path: str) -> Optional[str]:
+        """
+        이미지 파일의 미디어 타입을 반환합니다.
+
+        Args:
+            image_path: 이미지 파일 경로
+
+        Returns:
+            Optional[str]: 미디어 타입 문자열 또는 None
+        """
+        suffix = Path(image_path).suffix.lower()
+        media_type = self.SUPPORTED_FORMATS.get(suffix)
+        
+        if not media_type:
+            # mimetypes 라이브러리로 추가 확인
+            media_type, _ = mimetypes.guess_type(image_path)
+            
+        return media_type if media_type in self.SUPPORTED_FORMATS.values() else None
+
+    def optimize_image(self, image_path: str, quality: int = 85) -> Tuple[bytes, str]:
+        """
+        이미지를 최적화합니다.
+
+        Args:
+            image_path: 최적화할 이미지 파일 경로
+            quality: JPEG 품질 설정 (1-100)
+
+        Returns:
+            Tuple[bytes, str]: (최적화된 이미지 데이터, 미디어 타입)
+        """
+        with Image.open(image_path) as img:
+            # RGBA 이미지를 RGB로 변환
+            if img.mode == 'RGBA':
+                img = img.convert('RGB')
+                
+            # 이미지 크기 조정 (필요한 경우)
+            if max(img.size) > self.MAX_DIMENSION:
+                ratio = self.MAX_DIMENSION / max(img.size)
+                new_size = tuple(int(dim * ratio) for dim in img.size)
+                img = img.resize(new_size, Image.Resampling.LANCZOS)
+                
+            # 이미지를 바이트로 변환
+            buffer = io.BytesIO()
+            img.save(buffer, format='JPEG', quality=quality, optimize=True)
+            
+            return buffer.getvalue(), 'image/jpeg'
+
+    async def prepare_image_content(self, 
+                                  image_path: str, 
+                                  optimize: bool = True) -> Dict:
+        """
+        이미지를 API 요청에 맞는 형식으로 변환합니다.
+
+        Args:
+            image_path: 이미지 파일 경로
+            optimize: 이미지 최적화 여부
+
+        Returns:
+            Dict: Claude API에 전송할 수 있는 형식의 이미지 데이터
+
+        Raises:
+            ValueError: 지원하지 않는 이미지 형식이거나 파일이 존재하지 않는 경우
+            IOError: 파일 읽기 중 오류가 발생한 경우
+        """
+        # 이미지 유효성 검사
+        is_valid, error_message = self.validate_image(image_path)
+        if not is_valid:
+            raise ValueError(f"Invalid image: {error_message}")
+            
+        try:
+            # 캐시 확인
+            file_hash = self._calculate_file_hash(image_path)
+            cached_path = os.path.join(self.cache_dir, f"{file_hash}.cache")
+            
+            if os.path.exists(cached_path):
+                with open(cached_path, 'rb') as f:
+                    image_data = f.read()
+                media_type = self.cache_info.get(file_hash, {}).get('media_type')
+                
+                logger.info(f"Using cached image: {image_path}")
+                
+            else:
+                # 이미지 처리
+                if optimize:
+                    image_data, media_type = self.optimize_image(image_path)
+                else:
+                    with open(image_path, 'rb') as f:
+                        image_data = f.read()
+                    media_type = self.get_media_type(image_path)
+                
+                # 캐시 저장
+                with open(cached_path, 'wb') as f:
+                    f.write(image_data)
+                    
+                self.cache_info[file_hash] = {
+                    'original_path': image_path,
+                    'media_type': media_type,
+                    'timestamp': datetime.now().isoformat()
+                }
+                
+                logger.info(f"Processed and cached image: {image_path}")
+
+            # Base64 인코딩
+            base64_image = base64.b64encode(image_data).decode('utf-8')
+
+            return {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": media_type,
+                    "data": base64_image
+                }
+            }
+            
+        except IOError as e:
+            error_msg = f"이미지 파일 읽기 오류: {str(e)}"
+            logger.error(error_msg)
+            raise IOError(error_msg)
+        except Exception as e:
+            error_msg = f"이미지 처리 중 예상치 못한 오류 발생: {str(e)}"
+            logger.error(error_msg)
+            raise
+
+    def cleanup_cache(self, max_age_days: int = 7) -> None:
+        """
+        오래된 캐시 파일들을 정리합니다.
+
+        Args:
+            max_age_days: 이 일수보다 오래된 캐시 파일들을 삭제
+        """
+        try:
+            current_time = datetime.now()
+            files_removed = 0
+            
+            for cache_file in os.listdir(self.cache_dir):
+                file_path = os.path.join(self.cache_dir, cache_file)
+                file_hash = cache_file.split('.')[0]
+                
+                # 캐시 정보 확인
+                cache_info = self.cache_info.get(file_hash)
+                if cache_info:
+                    timestamp = datetime.fromisoformat(cache_info['timestamp'])
+                    if (current_time - timestamp).days > max_age_days:
+                        os.remove(file_path)
+                        del self.cache_info[file_hash]
+                        files_removed += 1
+                else:
+                    # 캐시 정보가 없는 파일은 삭제
+                    os.remove(file_path)
+                    files_removed += 1
+                    
+            logger.info(f"Cleaned up {files_removed} cached files")
+            
+        except Exception as e:
+            logger.error(f"Cache cleanup error: {str(e)}")
+
+    def get_cache_stats(self) -> Dict:
+        """
+        캐시 통계를 반환합니다.
+
+        Returns:
+            Dict: 캐시 통계 정보
+        """
+        total_size = 0
+        for file in os.listdir(self.cache_dir):
+            file_path = os.path.join(self.cache_dir, file)
+            total_size += os.path.getsize(file_path)
+            
+        return {
+            'cache_count': len(self.cache_info),
+            'total_size_mb': total_size / (1024 * 1024),
+            'cache_dir': self.cache_dir
+        }
+
+</vision_handler.py>

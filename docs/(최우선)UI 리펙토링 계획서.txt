@@ -1,0 +1,209 @@
+# UI 리팩토링 계획서
+
+## 1. EventEmitter 패턴 구현
+
+### 1.1 이벤트 시스템 구현
+```python
+from typing import Dict, List, Callable, Any
+from dataclasses import dataclass
+
+@dataclass
+class Event:
+    type: str
+    data: Any = None
+
+class EventEmitter:
+    def __init__(self):
+        self._listeners: Dict[str, List[Callable]] = {}
+        
+    def on(self, event_type: str, callback: Callable) -> None:
+        if event_type not in self._listeners:
+            self._listeners[event_type] = []
+        self._listeners[event_type].append(callback)
+        
+    def emit(self, event: Event) -> None:
+        if event.type in self._listeners:
+            for callback in self._listeners[event.type]:
+                callback(event.data)
+                
+    def remove_listener(self, event_type: str, callback: Callable) -> None:
+        if event_type in self._listeners:
+            self._listeners[event_type].remove(callback)
+```
+
+### 1.2 UI 이벤트 정의
+```python
+class UIEvents:
+    SEND_MESSAGE = "send_message"
+    RECEIVE_MESSAGE = "receive_message"
+    SESSION_SWITCH = "session_switch"
+    THEME_CHANGE = "theme_change"
+    ERROR_OCCURRED = "error_occurred"
+    STATE_CHANGE = "state_change"
+```
+
+## 2. UI와 비즈니스 로직 분리
+
+### 2.1 UI 컴포넌트 클래스
+```python
+class ChatUI:
+    def __init__(self, event_emitter: EventEmitter):
+        self.event_emitter = event_emitter
+        self.root = tk.Tk()
+        self.setup_ui()
+        
+    def setup_ui(self):
+        # UI 컴포넌트 초기화
+        self.create_chat_area()
+        self.create_input_area()
+        self.create_toolbar()
+        
+    def handle_send_message(self, message: str):
+        self.event_emitter.emit(Event(
+            UIEvents.SEND_MESSAGE,
+            {"content": message}
+        ))
+        
+    def update_chat_display(self, message_data: dict):
+        # 채팅 화면 업데이트 로직
+        pass
+```
+
+### 2.2 비즈니스 로직 클래스
+```python
+class ChatController:
+    def __init__(self, event_emitter: EventEmitter):
+        self.event_emitter = event_emitter
+        self.conversation_manager = ConversationManager()
+        self.setup_event_handlers()
+        
+    def setup_event_handlers(self):
+        self.event_emitter.on(UIEvents.SEND_MESSAGE, self.handle_send_message)
+        self.event_emitter.on(UIEvents.SESSION_SWITCH, self.handle_session_switch)
+        
+    async def handle_send_message(self, data: dict):
+        try:
+            response = await self.conversation_manager.process_message(data["content"])
+            self.event_emitter.emit(Event(
+                UIEvents.RECEIVE_MESSAGE,
+                {"response": response}
+            ))
+        except Exception as e:
+            self.event_emitter.emit(Event(
+                UIEvents.ERROR_OCCURRED,
+                {"error": str(e)}
+            ))
+```
+
+## 3. 의존성 주입 설정
+
+### 3.1 서비스 컨테이너
+```python
+class ServiceContainer:
+    def __init__(self):
+        self.event_emitter = EventEmitter()
+        self.config_manager = ConfigManager()
+        self.conversation_manager = ConversationManager()
+        
+    def create_chat_ui(self) -> ChatUI:
+        return ChatUI(self.event_emitter)
+        
+    def create_chat_controller(self) -> ChatController:
+        return ChatController(
+            self.event_emitter,
+            self.conversation_manager
+        )
+```
+
+### 3.2 애플리케이션 초기화
+```python
+class ChatApplication:
+    def __init__(self):
+        self.container = ServiceContainer()
+        self.ui = self.container.create_chat_ui()
+        self.controller = self.container.create_chat_controller()
+        
+    def run(self):
+        self.ui.root.mainloop()
+```
+
+## 4. 구현 단계
+
+### 4.1 Day 1: 기반 구조 구현
+- [ ] EventEmitter 클래스 구현
+- [ ] 기본 이벤트 타입 정의
+- [ ] 서비스 컨테이너 구현
+
+### 4.2 Day 2: UI 컴포넌트 리팩토링
+- [ ] ChatUI 클래스 구현
+- [ ] 기존 UIManager 코드 마이그레이션
+- [ ] 이벤트 기반 상호작용 구현
+
+### 4.3 Day 3: 비즈니스 로직 통합
+- [ ] ChatController 클래스 구현
+- [ ] ConversationManager 통합
+- [ ] 에러 처리 및 상태 관리 구현
+
+## 5. 테스트 계획
+
+### 5.1 단위 테스트
+```python
+class TestEventEmitter(unittest.TestCase):
+    def setUp(self):
+        self.emitter = EventEmitter()
+        
+    def test_event_emission(self):
+        received_data = None
+        def handler(data):
+            nonlocal received_data
+            received_data = data
+            
+        self.emitter.on("test", handler)
+        self.emitter.emit(Event("test", "test_data"))
+        self.assertEqual(received_data, "test_data")
+```
+
+### 5.2 통합 테스트
+```python
+class TestChatApplication(unittest.TestCase):
+    def setUp(self):
+        self.app = ChatApplication()
+        
+    async def test_message_flow(self):
+        # 메시지 전송 테스트
+        await self.app.controller.handle_send_message({
+            "content": "Test message"
+        })
+        # 응답 확인
+```
+
+## 6. 마이그레이션 계획
+
+### 6.1 단계별 마이그레이션
+1. 새로운 구조로 복사
+2. 이벤트 시스템 통합
+3. 기존 코드 점진적 마이그레이션
+4. 병렬 테스트 실행
+5. 최종 전환
+
+### 6.2 롤백 계획
+- 각 단계별 복구 지점 생성
+- 기존 코드 백업 유지
+- 단계별 검증 절차 수립
+
+## 7. 예상되는 개선점
+
+1. **구조적 개선**
+   - 순환 참조 제거
+   - 모듈 간 결합도 감소
+   - 테스트 용이성 향상
+
+2. **유지보수성 향상**
+   - 코드 재사용성 증가
+   - 기능 확장 용이성
+   - 디버깅 효율성 향상
+
+3. **성능 최적화**
+   - 메모리 사용량 감소
+   - 이벤트 처리 효율성
+   - 비동기 작업 최적화

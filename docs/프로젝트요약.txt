@@ -1,0 +1,178 @@
+# 프로젝트 개요: Claude API를 활용한 고급 챗봇 개발
+
+## 1. 프로젝트 목적
+- Anthropic의 Claude API를 사용하여 다기능 챗봇 애플리케이션 개발
+- 사용자 친화적이고 안전한 대화형 인터페이스 구현
+- 확장 가능하고 유지보수가 용이한 아키텍처 설계
+
+## 2. 주요 기능
+- 다중 세션 관리
+- 대화 기록 유지 및 관리
+- 마크다운 형식의 응답 처리 및 표시
+- 코드 블록 하이라이팅
+- 토큰 사용량 모니터링
+- max_tokens 및 temperature 설정
+- 대화 내용 암호화 저장 및 복호화
+- 이미지 처리 및 비전 기능
+- 컨텍스트 관리 및 시스템 프롬프트 제어
+- 에러 처리 및 재시도 메커니즘
+
+## 3. 기술 스택
+### 3.1 개발 환경
+- 언어: Python 3.12.4
+- 개발 환경: pyenv를 사용한 Python 버전 관리
+- 버전 관리: Git, GitHub (예정)
+
+### 3.2 주요 라이브러리
+- anthropic: Claude API 연동
+- markdown: 마크다운 처리
+- pygments: 코드 하이라이팅
+- python-dotenv: 환경변수 관리
+- cryptography: 암호화 기능
+- aiohttp: 비동기 HTTP 클라이언트
+- pillow: 이미지 처리
+- tkinter: GUI 구현
+
+## 4. 프로젝트 구조
+```
+claude-chatbot/
+├── src/
+│   ├── ui/                    # UI 관련 컴포넌트
+│   │   ├── __init__.py
+│   │   ├── chat_ui.py        # 이벤트 기반 메인 UI
+│   │   ├── context_menu.py   # 컨텍스트 메뉴 관리
+│   │   └── theme.py          # 테마 시스템
+│   ├── core/                  # 핵심 인프라스트럭처
+│   │   ├── __init__.py
+│   │   └── service_container.py  # 의존성 주입 컨테이너
+│   ├── controllers/           # 비즈니스 로직 컨트롤러
+│   │   ├── __init__.py
+│   │   └── chat_controller.py # 채팅 로직 제어
+│   ├── events/                # 이벤트 시스템
+│   │   ├── __init__.py
+│   │   ├── event_system.py   # 이벤트 기반 구조
+│   │   └── ui_events.py      # UI 이벤트 정의
+│   └── utils/                 # 유틸리티 기능
+│       ├── __init__.py
+│       └── logging.py        # 로깅 설정
+│
+├── tests/                     # 단위 테스트
+│   ├── __init__.py
+│   ├── test_chat_session.py
+│   ├── test_conversation_manager.py
+│   ├── test_vision_handler.py
+│   ├── test_context_manager.py
+│   ├── test_retry_handler.py
+│   ├── test_api_client.py
+│   ├── test_response_formatter.py
+│   └── test_encryption.py
+│
+├── config/                    # 설정 파일
+│   ├── config.yaml           # 기본 설정
+│   └── custom_themes.json    # 사용자 정의 테마
+│
+├── docs/                      # 문서
+│   ├── api/                  # API 문서
+│   ├── user/                 # 사용자 가이드
+│   └── dev/                  # 개발자 가이드
+│
+├── .env.example              # 환경변수 예시
+├── requirements.txt          # 의존성 목록
+├── README.md                 # 프로젝트 문서
+├── .gitignore               # Git 무시 파일
+├── .python-version          # Python 버전 정보
+├── main.py                  # 메인 실행 파일
+└── start.sh                 # 실행 스크립트
+```
+
+## 5. 보안 고려사항
+- API 키 암호화 및 환경변수 사용
+- 대화 내용 암호화 저장
+- 에러 메시지의 안전한 처리
+- 이미지 데이터의 안전한 처리
+- 세션 데이터 보호
+- 사용자 입력 검증
+
+## 6. 향후 계획
+### 6.1 단기 목표 (1-2주)
+- [ ] UIManager 리팩토링
+  - 이벤트 기반 시스템 구현
+  - 컴포넌트 분리
+  - 테마 시스템 개선
+- [ ] 비동기 처리 통합
+  - API 호출 최적화
+  - UI 응답성 향상
+- [ ] 메모리 최적화
+  - 세션 관리 개선
+  - 리소스 정리
+- [ ] 테스트 커버리지 향상
+
+### 6.2 중기 목표 (1-2개월)
+- [ ] 플러그인 시스템 구현
+- [ ] 대화 내용 검색 기능
+- [ ] 성능 모니터링 도구
+- [ ] 국제화(i18n) 지원
+
+### 6.3 장기 목표
+- [ ] 웹 인터페이스 추가
+- [ ] 멀티 유저 지원
+- [ ] API 서버 구현
+- [ ] 모바일 앱 개발
+
+## 7. 개발 가이드라인
+### 7.1 코드 스타일
+- PEP 8 준수
+- 타입 힌트 사용
+- 문서화 문자열(docstring) 필수
+- 비동기 함수는 'async/await' 사용
+
+### 7.2 테스트 요구사항
+- 단위 테스트 필수
+- 통합 테스트 권장
+- 테스트 커버리지 80% 이상
+- 모든 예외 처리 테스트
+
+### 7.3 커밋 규칙
+- feat: 새로운 기능
+- fix: 버그 수정
+- refactor: 코드 리팩토링
+- docs: 문서 수정
+- test: 테스트 코드
+- chore: 기타 변경사항
+
+## 8. 참고 사항
+- API 키는 항상 암호화하여 저장
+- 대화 내용은 자동으로 백업
+- 이미지 파일은 최적화하여 저장
+- 에러 로그는 상세히 기록
+
+## 9. 문서화
+### 9.1 문서 구조
+- API 문서: /docs/api/
+- 사용자 가이드: /docs/user/
+- 개발자 가이드: /docs/dev/
+- 변경 이력: CHANGELOG.md
+
+### 9.2 문서 작성 규칙
+- 마크다운 형식 사용
+- 코드 예제 포함
+- 스크린샷 첨부 (필요시)
+- 최신 상태 유지
+
+## 10. 현재 진행 상황
+### 10.1 완료된 작업
+- [x] 프로젝트 기본 구조 설정
+- [x] 이벤트 시스템 구현
+- [x] 테마 관리자 구현
+- [x] 컨텍스트 메뉴 시스템 구현
+
+### 10.2 진행 중인 작업
+- [ ] ChatController 구현
+- [ ] ServiceContainer 구현
+- [ ] UI 리팩토링
+- [ ] 테스트 코드 업데이트
+
+### 10.3 다음 작업
+- [ ] 기존 코드 마이그레이션
+- [ ] 문서 업데이트
+- [ ] 성능 최적화
