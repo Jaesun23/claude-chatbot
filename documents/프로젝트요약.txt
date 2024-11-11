@@ -1,0 +1,105 @@
+<documents>
+<document index="1">
+<source>프로젝트 요약.txt</source>
+<document_content>프로젝트 개요: Claude API를 활용한 고급 챗봇 개발
+
+1. 프로젝트 목적:
+   - Anthropic의 Claude API를 사용하여 다기능 챗봇 애플리케이션 개발
+   - 사용자 친화적이고 안전한 대화형 인터페이스 구현
+
+2. 주요 기능:
+   - 다중 세션 관리
+   - 대화 기록 유지 및 관리
+   - 마크다운 형식의 응답 처리 및 표시
+   - 코드 블록 하이라이팅
+   - 토큰 사용량 모니터링
+   - max_tokens 및 temperature 설정 기능
+   - 대화 내용 암호화 저장 및 복호화
+   - 이미지 처리 및 비전 기능
+   - 컨텍스트 관리 및 시스템 프롬프트 제어
+   - 에러 처리 및 재시도 메커니즘
+
+3. 기술 스택:
+   - 언어: Python 3.12.4
+   - 주요 라이브러리: 
+     * anthropic: Claude API 연동
+     * markdown: 마크다운 처리
+     * pygments: 코드 하이라이팅
+     * python-dotenv: 환경변수 관리
+     * cryptography: 암호화 기능
+     * aiohttp: 비동기 HTTP 클라이언트
+     * pillow: 이미지 처리
+   - 버전 관리: Git, GitHub (예정)
+   - 개발 환경: pyenv를 사용한 Python 버전 관리
+
+4. 프로젝트 구조:
+
+claude-chatbot/
+│
+├── src/
+│   ├── __init__.py
+│   ├── chat_session.py          # 대화 세션 관리 및 API 통신
+│   ├── conversation_manager.py  # 다중 대화 세션 관리
+│   ├── vision_handler.py        # 이미지 처리 및 비전 기능
+│   ├── context_manager.py       # 컨텍스트 및 시스템 프롬프트 관리
+│   ├── retry_handler.py         # API 재시도 및 에러 처리
+│   ├── api_client.py           # API 클라이언트 추상화
+│   ├── response_formatter.py    # 응답 포맷팅
+│   ├── encryption.py           # 암호화 기능
+│   └── utils.py                # 유틸리티 함수
+│
+├── tests/                      # 단위 테스트
+│   ├── __init__.py
+│   ├── test_chat_session.py
+│   ├── test_conversation_manager.py
+│   ├── test_vision_handler.py
+│   ├── test_context_manager.py
+│   ├── test_retry_handler.py
+│   ├── test_api_client.py
+│   ├── test_response_formatter.py
+│   └── test_encryption.py
+│
+├── .env.example                # 환경변수 예시
+├── requirements.txt            # 의존성 목록
+├── README.md                   # 프로젝트 문서
+├── .gitignore                 # Git 무시 파일
+├── .python-version            # Python 버전 정보
+├── main.py                    # 메인 실행 파일
+└── start.sh                   # 실행 스크립트
+
+5. 보안 고려사항:
+   - API 키 암호화 및 환경변수 사용
+   - 대화 내용 암호화 저장
+   - 에러 메시지의 안전한 처리
+   - 이미지 데이터의 안전한 처리
+
+6. 현재 진행 상황:
+   - 프로젝트 기본 구조 설정 완료
+   - 핵심 모듈 구현 (chat_session, vision_handler, context_manager, retry_handler)
+   - 보안 관련 요구사항 반영
+   - 테스트 코드 작성
+   - 대화 유지 관리 프로세스 구현
+
+7. 다음 단계:
+   - 이미지 처리 기능 테스트 및 최적화
+   - 컨텍스트 관리 시스템 개선
+   - 사용자 인터페이스 개선
+   - 대화 검색 기능 구현
+
+8. 향후 계획:
+   - GitHub 저장소 생성 및 초기 코드 푸시
+   - 지속적인 통합 (CI) 설정
+   - 코드 리뷰 프로세스 확립
+   - GUI 또는 웹 인터페이스로 확장
+
+9. 대화 유지 관리 전략:
+   - 세션별 대화 기록 저장
+   - 컨텍스트 유지를 위한 이전 메시지 포함
+   - 토큰 제한을 고려한 대화 기록 관리
+   - 주제 기반 대화 구조화
+   - 대화 검색 및 참조 기능
+   - 컨텍스트 전환 관리
+   
+이 프로젝트는 Claude API의 최신 기능들을 활용하여 강력하고 사용자 친화적인 챗봇을 구현하는 것을 목표로 합니다. 특히 이미지 처리, 컨텍스트 관리, 그리고 안정적인 에러 처리를 통해 견고한 애플리케이션을 만들고자 합니다.</document_content>
+</document>
+</documents>
